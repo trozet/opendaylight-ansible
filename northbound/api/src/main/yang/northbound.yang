@@ -29,6 +29,9 @@ module northbound {
                 type string;
                 description "role/playbook to execute";
             }
+            leaf status {
+                type string;
+            }
         }
     }
 }

@@ -17,6 +17,7 @@ import javax.inject.Singleton;
 import ch.vorburger.exec.ManagedProcess;
 import ch.vorburger.exec.ManagedProcessBuilder;
 import ch.vorburger.exec.ManagedProcessException;
+import org.opendaylight.ansible.northbound.api.AnsibleCommand;
 import org.opendaylight.controller.md.sal.binding.api.DataBroker;
 import org.opendaylight.controller.md.sal.common.api.data.LogicalDatastoreType;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.ansible.northbound.rev180821.commands.Command;
@@ -25,6 +26,9 @@ import org.opendaylight.yangtools.yang.binding.InstanceIdentifier;
 import org.ops4j.pax.cdi.api.OsgiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+
 
 @Singleton
 public class AnsibleCommandListener extends AbstractSyncDataTreeChangeListener<Command> {
@@ -62,7 +66,7 @@ public class AnsibleCommandListener extends AbstractSyncDataTreeChangeListener<C
         // just use localhost for now, should be real host in the future
         ManagedProcessBuilder ar = new ManagedProcessBuilder("ansible-runner")
                 .addArgument("-j").addArgument("--hosts").addArgument(host).addArgument("-p").addArgument(file);
-        ar.addArgument("run").addArgument(dir).addArgument("-vvv");
+        ar.addArgument("run").addArgument(dir);
 
         ManagedProcess p = ar.build();
         LOG.info("TROZET Starting Ansible process");
@@ -71,6 +75,31 @@ public class AnsibleCommandListener extends AbstractSyncDataTreeChangeListener<C
         p.waitForExit();
         String output = p.getConsole();
         LOG.info("TROZET process complete: {}", output);
+        try {
+            LOG.info("TROZET parsing json string into Event List");
+            AnsibleEventList el = new AnsibleEventList(parseAnsibleOutput(output));
+            AnsibleEvent lastEvent = el.getLastEvent();
+            LOG.info("TROZET stdout of last event is {}", lastEvent.getStdout());
+            // TODO(trozet) create method in AnsibleEventList to get pass/fail from event_data of last event
+        } catch (IOException | AnsibleCommandException e) {
+            LOG.error("TROZET unable to parse json {}", e.getMessage());
+        }
+    }
 
+    private String parseAnsibleOutput(String data) throws AnsibleCommandException {
+        LOG.info("Parsing result");
+        if (data.length() == 0) {
+            throw new AnsibleCommandException("Empty data in ansible output");
+        }
+        String[] lines = data.split("\\r?\\n");
+        StringBuilder jsonStringBuilder = new StringBuilder();
+        jsonStringBuilder.append("[");
+        for (String l : lines) {
+            jsonStringBuilder.append(l).append(",");
+        }
+        jsonStringBuilder.deleteCharAt(jsonStringBuilder.length()-1);
+        jsonStringBuilder.append("]");
+        LOG.info("munged json is {}", jsonStringBuilder.toString());
+        return jsonStringBuilder.toString();
     }
 }
