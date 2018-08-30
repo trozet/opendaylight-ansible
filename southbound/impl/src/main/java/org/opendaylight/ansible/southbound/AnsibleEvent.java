@@ -22,9 +22,10 @@ public class AnsibleEvent {
     public AnsibleEvent() {
     }
 
-    public String getEvent_data() {
-        return event_data.toString();
+    public ObjectNode getEvent_data() {
+        return event_data;
     }
+
 
     public String getUuid() {
         return uuid;

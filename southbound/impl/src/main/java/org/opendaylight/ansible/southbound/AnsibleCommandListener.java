@@ -10,24 +10,21 @@ package org.opendaylight.ansible.southbound;
 
 import static org.opendaylight.ansible.northbound.api.AnsibleCommand.ANSIBLE_COMMAND_PATH;
 
-import javax.annotation.Nonnull;
-import javax.inject.Inject;
-import javax.inject.Singleton;
-
 import ch.vorburger.exec.ManagedProcess;
 import ch.vorburger.exec.ManagedProcessBuilder;
 import ch.vorburger.exec.ManagedProcessException;
-import org.opendaylight.ansible.northbound.api.AnsibleCommand;
+import java.io.IOException;
+import javax.annotation.Nonnull;
+import javax.inject.Inject;
+import javax.inject.Singleton;
 import org.opendaylight.controller.md.sal.binding.api.DataBroker;
 import org.opendaylight.controller.md.sal.common.api.data.LogicalDatastoreType;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.ansible.northbound.rev180821.commands.Command;
 import org.opendaylight.serviceutils.tools.mdsal.listener.AbstractSyncDataTreeChangeListener;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.ansible.northbound.rev180821.commands.Command;
 import org.opendaylight.yangtools.yang.binding.InstanceIdentifier;
 import org.ops4j.pax.cdi.api.OsgiService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
 
 
 @Singleton
@@ -46,7 +43,7 @@ public class AnsibleCommandListener extends AbstractSyncDataTreeChangeListener<C
         try {
             runAnsible(command.getHost(), command.getDirectory(), command.getFile());
         } catch (ManagedProcessException e) {
-            LOG.error("TROZET Failed to execute ansible: {}", e.getMessage());
+            LOG.error("Failed to execute ansible: {}", e.getMessage());
         }
     }
 
@@ -62,27 +59,41 @@ public class AnsibleCommandListener extends AbstractSyncDataTreeChangeListener<C
     }
 
     private void runAnsible(String host, String dir, String file) throws ManagedProcessException {
-        LOG.info("TROZET Executing Ansible builder");
+        LOG.info("Executing Ansible");
         // just use localhost for now, should be real host in the future
         ManagedProcessBuilder ar = new ManagedProcessBuilder("ansible-runner")
                 .addArgument("-j").addArgument("--hosts").addArgument(host).addArgument("-p").addArgument(file);
         ar.addArgument("run").addArgument(dir);
 
         ManagedProcess p = ar.build();
-        LOG.info("TROZET Starting Ansible process");
-        p.start();
-        LOG.info("TROZET process alive: {}", Boolean.toString(p.isAlive()));
-        p.waitForExit();
-        String output = p.getConsole();
-        LOG.info("TROZET process complete: {}", output);
+        LOG.info("Starting Ansible process");
         try {
-            LOG.info("TROZET parsing json string into Event List");
+            p.start();
+            LOG.info("Ansible Process is alive: {}", Boolean.toString(p.isAlive()));
+            p.waitForExitMaxMsOrDestroy(120000);
+        } catch (ManagedProcessException e) {
+            LOG.warn("Process exited with error code: " + p.getProcLongName());
+        }
+        String output = p.getConsole();
+        LOG.info("Ansible process complete: {}", output);
+        try {
+            LOG.info("Parsing json string into Event List");
             AnsibleEventList el = new AnsibleEventList(parseAnsibleOutput(output));
             AnsibleEvent lastEvent = el.getLastEvent();
-            LOG.info("TROZET stdout of last event is {}", lastEvent.getStdout());
-            // TODO(trozet) create method in AnsibleEventList to get pass/fail from event_data of last event
+            LOG.info("Stdout of last event is {}", lastEvent.getStdout());
+            if (el.AnsiblePassed()) {
+                LOG.info("Ansible Passed for " + p.getProcLongName());
+            } else {
+                LOG.error("Ansible Failed for " + p.getProcLongName());
+                AnsibleEvent failedEvent = el.getFailedEvent();
+                if (failedEvent != null) {
+                    LOG.error("Failed Event Output: " + failedEvent.getStdout());
+                } else {
+                    LOG.error("Unable to determine failed event");
+                }
+            }
         } catch (IOException | AnsibleCommandException e) {
-            LOG.error("TROZET unable to parse json {}", e.getMessage());
+            LOG.error("Unable to determine Ansible execution result {}", e.getMessage());
         }
     }
 
